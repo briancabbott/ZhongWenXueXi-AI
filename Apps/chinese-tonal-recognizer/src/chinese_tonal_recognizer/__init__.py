@@ -8,6 +8,19 @@ from pathlib import Path
 
 import numpy as np
 
+MS_TO_SECONDS = 1000.0
+MIN_RMS_THRESHOLD = 1e-4
+AUTOCORR_THRESHOLD = 0.22
+
+NEUTRAL_MIN_DURATION_S = 0.18
+NEUTRAL_MIN_RANGE_LOG2 = 0.12
+LEVEL_MAX_DELTA_LOG2 = 0.08
+LEVEL_MAX_RANGE_LOG2 = 0.26
+VALLEY_MARGIN_LOG2 = 0.05
+VALLEY_MIN_RANGE_LOG2 = 0.2
+RISING_DELTA_LOG2 = 0.1
+FALLING_DELTA_LOG2 = -0.1
+
 
 @dataclass
 class ToneSegment:
@@ -102,7 +115,7 @@ def read_wav_mono(path: Path) -> tuple[np.ndarray, int]:
 def estimate_pitch_hz(frame: np.ndarray, sample_rate: int, min_f0: float, max_f0: float) -> float:
     frame = frame - np.mean(frame)
     rms = float(np.sqrt(np.mean(frame**2)))
-    if rms < 1e-4:
+    if rms < MIN_RMS_THRESHOLD:
         return float("nan")
 
     frame = frame * np.hamming(len(frame))
@@ -122,7 +135,7 @@ def estimate_pitch_hz(frame: np.ndarray, sample_rate: int, min_f0: float, max_f0
     peak = float(autocorr[best_lag])
     energy = float(autocorr[0])
 
-    if energy <= 0.0 or peak / energy < 0.22:
+    if energy <= 0.0 or peak / energy < AUTOCORR_THRESHOLD:
         return float("nan")
 
     return float(sample_rate / best_lag)
@@ -136,8 +149,8 @@ def f0_track(
     min_f0: float,
     max_f0: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    frame_size = max(1, int(sample_rate * frame_ms / 1000.0))
-    hop_size = max(1, int(sample_rate * hop_ms / 1000.0))
+    frame_size = max(1, int(sample_rate * frame_ms / MS_TO_SECONDS))
+    hop_size = max(1, int(sample_rate * hop_ms / MS_TO_SECONDS))
 
     if len(audio) < frame_size:
         return np.array([]), np.array([]), np.array([])
@@ -157,6 +170,7 @@ def f0_track(
 
 
 def close_small_gaps(mask: np.ndarray, gap_frames: int = 2) -> np.ndarray:
+    """Fill short unvoiced gaps between voiced frames to avoid over-splitting segments."""
     closed = mask.copy()
     i = 0
     while i < len(mask):
@@ -189,6 +203,15 @@ def voiced_segments(mask: np.ndarray, min_frames: int) -> list[tuple[int, int]]:
 
 
 def classify_tone(segment_f0: np.ndarray, duration: float) -> tuple[int, float]:
+    """Classify one voiced segment into Mandarin tone (1-5) and confidence (0-1).
+
+    Heuristics use log-pitch contour shape:
+    - tone 1: mostly level
+    - tone 2: rising
+    - tone 3: dipping/valley
+    - tone 4: falling
+    - tone 5: short or low-variation neutral contour
+    """
     log_f0 = np.log2(segment_f0)
     t = np.linspace(0.0, 1.0, num=len(log_f0))
 
@@ -201,23 +224,23 @@ def classify_tone(segment_f0: np.ndarray, duration: float) -> tuple[int, float]:
     delta = late - early
     f0_range = float(np.max(log_f0) - np.min(log_f0))
 
-    if duration < 0.18 or f0_range < 0.12:
+    if duration < NEUTRAL_MIN_DURATION_S or f0_range < NEUTRAL_MIN_RANGE_LOG2:
         return 5, 0.55
 
-    if abs(delta) < 0.08 and f0_range < 0.26:
+    if abs(delta) < LEVEL_MAX_DELTA_LOG2 and f0_range < LEVEL_MAX_RANGE_LOG2:
         confidence = float(np.clip(0.9 - abs(delta) * 2.0 - f0_range, 0.5, 0.95))
         return 1, confidence
 
-    valley = middle + 0.05 < min(early, late)
-    if valley and f0_range > 0.2:
+    has_valley_contour = middle + VALLEY_MARGIN_LOG2 < min(early, late)
+    if has_valley_contour and f0_range > VALLEY_MIN_RANGE_LOG2:
         confidence = float(np.clip(0.6 + f0_range, 0.55, 0.95))
         return 3, confidence
 
-    if delta > 0.1:
+    if delta > RISING_DELTA_LOG2:
         confidence = float(np.clip(0.6 + delta + (f0_range * 0.25), 0.55, 0.95))
         return 2, confidence
 
-    if delta < -0.1:
+    if delta < FALLING_DELTA_LOG2:
         confidence = float(np.clip(0.6 + abs(delta) + (f0_range * 0.2), 0.55, 0.95))
         return 4, confidence
 
@@ -243,8 +266,8 @@ def analyze_tones(
     energetic = rms_values >= (max_rms * energy_threshold if max_rms > 0 else 0)
     mask = close_small_gaps(voiced & energetic)
 
-    hop_seconds = hop_ms / 1000.0
-    min_frames = max(1, int((min_segment_ms / 1000.0) / hop_seconds))
+    hop_seconds = hop_ms / MS_TO_SECONDS
+    min_frames = max(1, int((min_segment_ms / MS_TO_SECONDS) / hop_seconds))
 
     segments = voiced_segments(mask, min_frames=min_frames)
     result: list[ToneSegment] = []
