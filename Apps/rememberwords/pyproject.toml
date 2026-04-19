@@ -1,0 +1,20 @@
+[project]
+name = "rememberwords"
+version = "0.1.0"
+description = "CLI flashcards and quizzes for Hanzi and Pinyin study"
+readme = "README.md"
+authors = [
+    { name = "Brian Abbott", email = "briancabbott@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "pinyin2hanzi>=0.1.1",
+    "pypinyin>=0.55.0",
+]
+
+[project.scripts]
+rememberwords = "rememberwords:main"
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
