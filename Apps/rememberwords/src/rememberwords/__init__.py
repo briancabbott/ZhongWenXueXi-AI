@@ -75,16 +75,17 @@ def add_word(words: list[WordEntry], raw_input: str, provided_hanzi: str | None 
         hanzi = text
         pinyin = pinyin_from_hanzi(hanzi)
     else:
-        pinyin = " ".join(part for part in re.split(r"\s+", text.lower()) if part)
         if provided_hanzi:
             hanzi = provided_hanzi.strip()
         else:
+            pinyin = " ".join(part for part in re.split(r"\s+", text.lower()) if part)
             candidates = hanzi_candidates_from_pinyin(pinyin)
             if not candidates:
                 raise ValueError("Could not find Hanzi for that pinyin. Use --hanzi to provide it.")
             hanzi = candidates[0]
+        pinyin = pinyin_from_hanzi(hanzi)
 
-    if any(word.hanzi == hanzi and word.pinyin == pinyin for word in words):
+    if any(word.hanzi == hanzi for word in words):
         raise ValueError("This word is already in your list.")
 
     entry = WordEntry(hanzi=hanzi, pinyin=pinyin)
