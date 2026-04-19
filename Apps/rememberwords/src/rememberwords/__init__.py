@@ -114,7 +114,7 @@ def run_quiz(words: list[WordEntry], count: int) -> None:
         return
 
     if count <= 0:
-        raise ValueError("Quiz count must be positive.")
+        raise ValueError(f"Quiz count must be positive, got {count}.")
 
     prompts = random.sample(words, k=min(count, len(words)))
     correct_answers = 0
